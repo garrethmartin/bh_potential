@@ -55,5 +55,4 @@ potentials = octree.compute_potentials(positions)
 ```
 
 ## **References**
-Barnes, J. and Hut, P., 1986. A hierarchical O (N log N) force-calculation algorithm. [Nature, 324(6096), pp.446-449](https://ui.adsabs.harvard.edu/abs/1986Na\
-tur.324..446B/abstract)
+Barnes, J. and Hut, P., 1986. A hierarchical O (N log N) force-calculation algorithm. [Nature, 324(6096), pp.446-449](https://ui.adsabs.harvard.edu/abs/1986Natur.324..446B/abstract "Barnes & Hut (1686)")
