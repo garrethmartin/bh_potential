@@ -22,8 +22,6 @@ offsets[:] = [
     [-1, -1, -1],
 ]
 
-cdef int max_depth = 1 # store the maximum depth of the tree
-
 # C struct for Particle
 cdef struct Particle:
     double[3] position
