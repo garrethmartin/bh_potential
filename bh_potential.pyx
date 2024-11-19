@@ -6,7 +6,7 @@ import numpy as np
 cimport numpy as np
 
 
-cdef double G = 4.30091e-6 # big G
+cdef double G = 4.30091e-6 # big G for units of kpc km^2 / Msun / s^2
 cdef double THETA = 0.5  # Barnes-Hut accuracy threshold
 cdef int MAX_OCTREE_DEPTH = 16
 
@@ -256,10 +256,10 @@ cdef class Octree:
         ----------
         positions_p : np.ndarray
             A 2D NumPy array of shape (n_particles, 3) containing the positions 
-            of particles in 3D space.
+            of particles in 3D space in units of kpc.
         masses_p : np.ndarray
             A 1D NumPy array of shape (n_particles,) containing the masses 
-            of the particles.
+            of the particles in units of solar masses.
 
         Notes
         -----
@@ -304,7 +304,7 @@ cdef class Octree:
         ----------
         positions_p : np.ndarray
             A 2D NumPy array of shape (n_points, 3) containing the positions 
-            where the gravitational potential should be calculated.
+            where the gravitational potential should be calculated in units of kpc.
         njobs : int, optional
             Number of parallel jobs to use for the calculation (default is 1).
             Currently, parallel computation (`njobs > 1`) is not implemented.
