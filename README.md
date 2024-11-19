@@ -23,6 +23,7 @@ octree = bh.Octree(positions, masses)
 ```
 
 `positions`: A NumPy array of shape (n_particles, 3) representing particle positions in 3D space in units of kpc.
+
 `masses`: A NumPy array of shape (n_particles,) containing the masses of the particles in units of solar masses.
 
 ### *Compute gravitational potentials at new positions*
@@ -32,6 +33,7 @@ potentials = octree.compute_potentials(test_positions)
 ```
 
 `test_positions`: A NumPy array of shape (n_points, 3) containing the positions where the potential should be evaluated.
+
 `Returns`: A NumPy array of shape (n_points,) with the computed gravitational potentials.
 
 ## Example
