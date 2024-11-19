@@ -197,7 +197,6 @@ cdef void compute_potential_serial(OctreeNode* root, double[:, :] positions, int
     '''
     compute the gravitational potential for a batch of particles
     '''
-    cdef double[3] position
     cdef double[3] r_vec
     cdef double r_sq
     cdef double r
@@ -209,9 +208,6 @@ cdef void compute_potential_serial(OctreeNode* root, double[:, :] positions, int
     cdef OctreeNode* current_node
 
     for i in range(n_parts):
-        position[0] = positions[i, 0]
-        position[1] = positions[i, 1]
-        position[2] = positions[i, 2]
         stack_size = 0  # reset stack size
 
         # push the root node onto stack
@@ -227,7 +223,7 @@ cdef void compute_potential_serial(OctreeNode* root, double[:, :] positions, int
 
             # distance between particle and node COM
             for j in range(3):
-                r_vec[j] = position[j] - current_node.com[j]
+                r_vec[j] = positions[i, j] - current_node.com[j]
 
             r_sq = r_vec[0] * r_vec[0] + r_vec[1] * r_vec[1] + r_vec[2] * r_vec[2]
             
