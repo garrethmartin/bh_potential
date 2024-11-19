@@ -250,7 +250,21 @@ cdef class Octree:
 
     def __init__(self, positions_p: np.ndarray, masses_p: np.ndarray):
         """
-        Initialize the octree and insert particles.
+        Initialize the octree and insert particles into it.
+
+        Parameters
+        ----------
+        positions_p : np.ndarray
+            A 2D NumPy array of shape (n_particles, 3) containing the positions 
+            of particles in 3D space.
+        masses_p : np.ndarray
+            A 1D NumPy array of shape (n_particles,) containing the masses 
+            of the particles.
+
+        Notes
+        -----
+        This function creates the root node of the octree, inserts all particles, 
+        and calculates the mass and center of mass for the entire tree.
         """
         cdef int i
         cdef int n = positions_p.shape[0]
@@ -282,15 +296,29 @@ cdef class Octree:
         # compute mass and center of mass over the entire tree
         compute_mass_com(self.root)
 
-    def __dealloc__(self):
-        """
-        free the allocated memory for the octree.
-        """
-        free_octree(self.root)  # Free the octree structure
-
     def compute_potentials(self, positions_p: np.ndarray, njobs: int = 1):
         """
-        calculate the gravitational potential for a batch of points.
+        Calculate the gravitational potential at specified positions.
+
+        Parameters
+        ----------
+        positions_p : np.ndarray
+            A 2D NumPy array of shape (n_points, 3) containing the positions 
+            where the gravitational potential should be calculated.
+        njobs : int, optional
+            Number of parallel jobs to use for the calculation (default is 1).
+            Currently, parallel computation (`njobs > 1`) is not implemented.
+
+        Returns
+        -------
+        np.ndarray
+            A 1D NumPy array of shape (n_points,) containing the gravitational 
+            potential at each input position.
+
+        Notes
+        -----
+        The gravitational potential is calculated using the Barnes-Hut approximation.
+        For now, only single-threaded execution is supported.
         """
         cdef int n = self.n  # Use same n from the initial octree build
         cdef int n_parts = len(positions_p)
@@ -308,3 +336,9 @@ cdef class Octree:
             compute_potential_serial(self.root, positions, n_parts, potentials)
 
         return np.array(potentials)
+    
+    def __dealloc__(self):
+        """
+        free the allocated memory for the octree.
+        """
+        free_octree(self.root)  # Free the octree structure
