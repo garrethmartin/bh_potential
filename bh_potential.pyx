@@ -245,26 +245,29 @@ cdef void compute_potential_serial(OctreeNode* root, double[:, :] positions, int
     
                 
 cdef class Octree:
+    """
+    Initialize the octree and insert particles into it.
+
+    Parameters
+    ----------
+    positions_p : np.ndarray
+        A 2D NumPy array of shape (n_particles, 3) containing the positions 
+        of particles in 3D space in units of kpc.
+    masses_p : np.ndarray
+        A 1D NumPy array of shape (n_particles,) containing the masses 
+        of the particles in units of solar masses.
+
+    Notes
+    -----
+    This function creates the root node of the octree, inserts all particles, 
+    and calculates the mass and center of mass for the entire tree.
+    """
     cdef OctreeNode* root
     cdef int n  # number of particles in tree
 
     def __init__(self, positions_p: np.ndarray, masses_p: np.ndarray):
         """
         Initialize the octree and insert particles into it.
-
-        Parameters
-        ----------
-        positions_p : np.ndarray
-            A 2D NumPy array of shape (n_particles, 3) containing the positions 
-            of particles in 3D space in units of kpc.
-        masses_p : np.ndarray
-            A 1D NumPy array of shape (n_particles,) containing the masses 
-            of the particles in units of solar masses.
-
-        Notes
-        -----
-        This function creates the root node of the octree, inserts all particles, 
-        and calculates the mass and center of mass for the entire tree.
         """
         cdef int i
         cdef int n = positions_p.shape[0]
