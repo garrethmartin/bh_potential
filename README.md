@@ -33,7 +33,7 @@ potentials = octree.compute_potentials(test_positions)
 
 `test_positions`: A NumPy array of shape (n_points, 3) containing the positions where the potential should be evaluated.
 
-Returns: A NumPy array of shape (n_points,) with the computed gravitational potentials.
+`Returns`: A NumPy array of shape (n_points,) with the computed gravitational potentials.
 
 ## Example:
 
