@@ -1,4 +1,4 @@
-#cython: boundscheck=False, wraparound=False, nonecheck=False
+#cython: boundscheck=False, wraparound=False, nonecheck=False, language_level=3
 
 from libc.stdlib cimport malloc, free, realloc
 from libc.math cimport sqrt
