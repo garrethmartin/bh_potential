@@ -44,7 +44,7 @@ import bh_potential as bh
 
 # Create normally distributed test data
 N_pot = 20000 # number of particles
-M_pot = 3e12 # total mass in m_sub
+M_pot = 3e12 # total mass in m_sun
 R_pot = 100 # standard deviation in kpc
 positions = np.random.normal(0, R_pot, (N_pot, 3))
 masses = np.asarray([M_pot/N_pot]*N_pot)
