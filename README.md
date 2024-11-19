@@ -13,7 +13,7 @@ python setup.py build_ext --inplace
 ```
 ## **Usage**
 
-### *Initialize the octree:*
+#### *Initialize the octree*
 
 The Octree class takes particle positions and masses as input, constructs the octree, and computes the mass and center of mass for all nodes:
 ```
@@ -26,7 +26,7 @@ octree = bh.Octree(positions, masses)
 
 `masses`: A NumPy array of shape (n_particles,) containing the masses of the particles in units of solar masses.
 
-### *Compute gravitational potentials at new positions*
+#### *Compute gravitational potentials at new positions*
 Use the compute_potentials method to calculate the gravitational potential at specified positions:
 ```
 potentials = octree.compute_potentials(test_positions)
