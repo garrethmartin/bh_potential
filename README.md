@@ -1,8 +1,8 @@
 # **README** for `bh_potential`
 
-## Purpose:
+## **Purpose**
 
-`bh_potential` is a Python extension that computes gravitational potentials for a group of particles using the *Barnes & Hut (1686)* octree method. This approach significantly reduces computational costs compared to direct N-body calculations by approximating distant interactions.
+`bh_potential` is a Python extension that computes gravitational potentials for a group of particles using the [Barnes & Hut (1686)](https://ui.adsabs.harvard.edu/abs/1986Natur.324..446B/abstract "Barnes & Hut (1686)") octree method. This approach significantly reduces computational costs compared to direct N-body calculations by approximating distant interactions.
 
 ## **Installation**
 
@@ -11,9 +11,9 @@ To build the extension, run the following command in the root directory:
 ```
 python setup.py build_ext --inplace
 ```
-## Usage:
+## **Usage**
 
-### Initialize the octree:
+### *Initialize the octree:*
 
 The Octree class takes particle positions and masses as input, constructs the octree, and computes the mass and center of mass for all nodes:
 ```
@@ -25,17 +25,16 @@ octree = bh.Octree(positions, masses)
 `positions`: A NumPy array of shape (n_particles, 3) representing particle positions in 3D space in units of kpc.
 `masses`: A NumPy array of shape (n_particles,) containing the masses of the particles in units of solar masses.
 
-### Compute gravitational potentials at new positions
+### *Compute gravitational potentials at new positions*
 Use the compute_potentials method to calculate the gravitational potential at specified positions:
 ```
 potentials = octree.compute_potentials(test_positions)
 ```
 
 `test_positions`: A NumPy array of shape (n_points, 3) containing the positions where the potential should be evaluated.
-
 `Returns`: A NumPy array of shape (n_points,) with the computed gravitational potentials.
 
-## Example:
+## Example
 
 ```
 import numpy as np
@@ -54,3 +53,7 @@ octree = bh.Octree(positions, masses)
 # Evaluate the potential at the same positions
 potentials = octree.compute_potentials(positions)
 ```
+
+## **References**
+Barnes, J. and Hut, P., 1986. A hierarchical O (N log N) force-calculation algorithm. [Nature, 324(6096), pp.446-449](https://ui.adsabs.harvard.edu/abs/1986Na\
+tur.324..446B/abstract)
