@@ -2,7 +2,7 @@
 
 ## **Purpose**
 
-`bh_potential` is a Python extension that computes gravitational potentials for a group of particles using the [Barnes & Hut (1686)](https://ui.adsabs.harvard.edu/abs/1986Natur.324..446B/abstract "Barnes & Hut (1686)") octree method. This approach significantly reduces computational costs compared to direct N-body calculations by approximating distant interactions.
+`bh_potential` is a Python extension that computes gravitational potentials for a group of particles using the [Barnes & Hut (1986)](https://ui.adsabs.harvard.edu/abs/1986Natur.324..446B/abstract "Barnes & Hut (1686)") octree method. This approach significantly reduces computational costs compared to direct N-body calculations by approximating distant interactions.
 
 ## **Installation**
 
