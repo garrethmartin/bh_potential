@@ -7,7 +7,6 @@ cimport numpy as np
 import matplotlib.pyplot as plt
 
 # constants
-#cdef double THETA = 0.5  # Barnes-Hut accuracy threshold
 cdef int MAX_OCTREE_DEPTH = 12
 
 # offsets used for subdividing octree
@@ -154,9 +153,6 @@ cdef class Octree:
         z-coordinate slice and are within the specified maximum depth. Each node is 
         represented as a square in the 2D projection, and its size corresponds to 
         the node's spatial extent in the octree.
-
-        The visualization provides insights into the spatial distribution of mass 
-        and the hierarchical structure of the tree.
         """
         # retreive properties of each node
         node_mass, node_size, node_cent, node_com, node_depth, node_npart = collect_tree(self.root)
