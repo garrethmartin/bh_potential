@@ -58,7 +58,7 @@ potentials = octree.compute_potentials(positions)
 
 ## Demo
 
-See Demo.ipynb for a demonstration of some of the features of the code.
+See [Demo.ipynb](https://github.com/garrethmartin/bh_potential/blob/main/Demo.ipynb "Demo.ipynb") for a demonstration of some of the features of the code.
 
 ## **References**
 Barnes, J. and Hut, P., 1986. A hierarchical O (N log N) force-calculation algorithm. [Nature, 324(6096), pp.446-449](https://ui.adsabs.harvard.edu/abs/1986Natur.324..446B/abstract "Barnes & Hut (1686)")
