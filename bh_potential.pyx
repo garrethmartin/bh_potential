@@ -7,7 +7,6 @@ cimport numpy as np
 import matplotlib.pyplot as plt
 
 # constants
-cdef int MAX_OCTREE_DEPTH = 16
 
 # offsets used for subdividing octree
 cdef double offsets[8][3]
@@ -68,8 +67,9 @@ cdef class Octree:
     cdef double theta # Barnes-Hut accuracy threshold
     cdef double[:, :] positions
     cdef double[:] masses
+    cdef int max_depth
 
-    def __init__(self, positions_p: np.ndarray, masses_p: np.ndarray, theta: float = 0.5, G: float = 4.30091e-6):
+    def __init__(self, positions_p: np.ndarray, masses_p: np.ndarray, theta: float = 0.5, G: float = 4.30091e-6, max_depth: int = 16):
         """
         Initialize the octree and insert particles into it.
         """
@@ -81,6 +81,7 @@ cdef class Octree:
         self.n = n
         self.theta = theta
         self.G = G  
+        self.max_depth = max_depth
 
         # get centre of mass of all particles
         center[0], center[1], center[2] = np.average(positions_p, axis=0, weights=masses_p)
@@ -102,7 +103,7 @@ cdef class Octree:
 
         # insert each particle into the octree
         for i in range(n):
-            insert(self.root, &positions[i, 0], masses[i])
+            insert(self.root, &positions[i, 0], masses[i], self.max_depth)
 
         # compute mass and center of mass over the entire tree
         compute_mass_com(self.root)
@@ -241,7 +242,7 @@ cdef class Octree:
         cdef int i, j
 
         # allocate a stack array with the maximum possible size of the number of particles used to build the tree
-        cdef int stack_capacity = 2 * MAX_OCTREE_DEPTH # heuristic for largest expected stack size
+        cdef int stack_capacity = 2 * self.max_depth # heuristic for largest expected stack size
         cdef OctreeNode** stack = <OctreeNode**> malloc(stack_capacity * sizeof(OctreeNode*))
         if stack is NULL:
             raise MemoryError("Failed to allocate initial stack")
@@ -319,12 +320,12 @@ cdef OctreeNode* create_octree_node(double[3] center, double size, int depth):
     
     return node
 
-cdef void insert(OctreeNode* node, double[3] position, double mass):
+cdef void insert(OctreeNode* node, double[3] position, double mass, int max_depth):
     '''
     inserts a particle into an OctreeNode
     '''
-    # don't go any deeper than than MAX_OCTREE_DEPTH
-    if node.depth >= MAX_OCTREE_DEPTH:
+    # don't go any deeper than than max_depth
+    if node.depth >= max_depth:
         # insert particle into the current node, don't subdivide further
         if node.particles is NULL:
             node.particles = <Particle*>malloc(sizeof(Particle))
@@ -350,12 +351,12 @@ cdef void insert(OctreeNode* node, double[3] position, double mass):
     # if depth is not too large, allow subdivision
     if node.children[0] is NULL:
         _subdivide(node)
-        _reinsert_existing_particles(node)
-        _insert_in_child(node, position, mass)
+        _reinsert_existing_particles(node, max_depth)
+        _insert_in_child(node, position, mass, max_depth)
     else:
-        _insert_in_child(node, position, mass)
+        _insert_in_child(node, position, mass, max_depth)
 
-cdef void _reinsert_existing_particles(OctreeNode* node):
+cdef void _reinsert_existing_particles(OctreeNode* node, int max_depth):
     '''
     reinsert existing particles into the new child nodes
     '''
@@ -364,13 +365,13 @@ cdef void _reinsert_existing_particles(OctreeNode* node):
     
     for i in range(node.num_particles):
         particle = node.particles[i]
-        _insert_in_child(node, particle.position, particle.mass)
+        _insert_in_child(node, particle.position, particle.mass, max_depth)
     # free memory allocated for particles
     free(node.particles)
     node.particles = NULL
     node.num_particles = 0
 
-cdef void _insert_in_child(OctreeNode* node, double[3] position, double mass):
+cdef void _insert_in_child(OctreeNode* node, double[3] position, double mass, int max_depth):
     '''
     insert a particle into a child node
     '''
@@ -388,7 +389,7 @@ cdef void _insert_in_child(OctreeNode* node, double[3] position, double mass):
             if abs(diff) > child.size / 2:
                 break
         else:
-            insert(child, position, mass)
+            insert(child, position, mass, max_depth)
             child.num_particles += 1
             break
             
