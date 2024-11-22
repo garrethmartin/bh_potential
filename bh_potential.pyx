@@ -7,7 +7,7 @@ cimport numpy as np
 import matplotlib.pyplot as plt
 
 # constants
-cdef int MAX_OCTREE_DEPTH = 12
+cdef int MAX_OCTREE_DEPTH = 16
 
 # offsets used for subdividing octree
 cdef double offsets[8][3]
@@ -107,7 +107,7 @@ cdef class Octree:
         # compute mass and center of mass over the entire tree
         compute_mass_com(self.root)
         
-    def tree_info(self):
+    def tree_info(self, max_search_depth=10):
         """
         Retrieve the properties of each octree node.
 
@@ -129,15 +129,15 @@ cdef class Octree:
         snapshot of the tree's structure, which is useful for diagnostics and 
         visualization.
         """
-        return collect_tree(self.root)
+        return collect_tree(self.root, max_search_depth)
     
-    def plot_octree_slice(self, max_depth=8, z_slice=0):
+    def plot_octree_slice(self, max_search_depth=10, z_slice=0):
         """
         Visualize a 2D slice of the octree structure at a specific depth and z-coordinate.
 
         Parameters
         ----------
-        max_depth : int, optional
+        max_search_depth : int, optional
             Maximum depth of the nodes to include in the visualization (default is 8).
         z_slice : float, optional
             z-coordinate of the slice in kpc (default is 0).
@@ -155,13 +155,13 @@ cdef class Octree:
         the node's spatial extent in the octree.
         """
         # retreive properties of each node
-        node_mass, node_size, node_cent, node_com, node_depth, node_npart = collect_tree(self.root)
+        node_mass, node_size, node_cent, node_com, node_depth, node_npart = collect_tree(self.root, max_search_depth)
 
 
-        # select nodes above max_depth that overlap with the z_slice
+        # select nodes above max_search_depth that overlap with the z_slice
         z_min = node_cent[:, 2] - node_size / 2
         z_max = node_cent[:, 2] + node_size / 2
-        valid_nodes = (z_min <= z_slice) & (z_max >= z_slice) & (node_depth <= max_depth)
+        valid_nodes = (z_min <= z_slice) & (z_max >= z_slice) & (node_depth <= max_search_depth)
 
         # filter the nodes that meet both conditions
         valid_centers = node_cent[valid_nodes]
@@ -181,7 +181,7 @@ cdef class Octree:
         ax.set_xlim(-max_pos,max_pos)
         ax.set_ylim(-max_pos,max_pos)
 
-        ax.text(0.98, 0.98, f'Octree Structure (Depth ≤ {max_depth})', transform=ax.transAxes,
+        ax.text(0.98, 0.98, f'Octree Structure (Depth ≤ {max_search_depth})', transform=ax.transAxes,
                 fontsize=16, va='top', ha='right')
 
     def compute_potentials(self, positions_p: np.ndarray, njobs: int = 1):
@@ -432,10 +432,10 @@ cdef void compute_mass_com(OctreeNode* node):
 
     node.mass = total_mass
     
-cdef tuple collect_tree(OctreeNode* node, int depth=0):
+cdef tuple collect_tree(OctreeNode* node, int max_search_depth=10, int depth=0):
     '''
     Collect mass, size, position, center of mass, depth, and number of particles for all nodes
-    and return them as numpy arrays.
+    up to a given maximum depth and return them as numpy arrays.
     '''
     # initialize lists to hold the data for each node
     cdef list masses_list = []
@@ -445,8 +445,8 @@ cdef tuple collect_tree(OctreeNode* node, int depth=0):
     cdef list depths_list = []
     cdef list num_particles_list = []
 
-    # if the node has no children (leaf node), just return its mass, size, position, COM, depth, and number of particles
-    if node.children[0] is NULL:
+    # if the node has no children (leaf node) or the depth exceeds max_search_depth, just return its mass, size, position, COM, depth, and number of particles
+    if node.children[0] is NULL or depth > max_search_depth:
         masses_list.append(node.mass)
         sizes_list.append(node.size)
         positions_list.append(tuple(node.center)) 
@@ -462,7 +462,7 @@ cdef tuple collect_tree(OctreeNode* node, int depth=0):
     for i in range(8):
         if node.children[i] is not NULL:
             child_masses, child_sizes, child_positions, child_coms, child_depths, child_num_particles = \
-                collect_tree(node.children[i], depth + 1)
+                collect_tree(node.children[i], max_search_depth, depth + 1)
             
             # extend the lists with the new child data
             masses_list.extend(child_masses.tolist())
