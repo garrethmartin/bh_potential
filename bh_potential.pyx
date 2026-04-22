@@ -1,12 +1,10 @@
 #cython: boundscheck=False, wraparound=False, nonecheck=False, language_level=3
-
 from libc.stdlib cimport malloc, free, realloc
 from libc.math cimport sqrt
+from cython.parallel cimport prange
 import numpy as np
 cimport numpy as np
 import matplotlib.pyplot as plt
-
-# constants
 
 # offsets used for subdividing octree
 cdef double offsets[8][3]
@@ -32,7 +30,8 @@ ctypedef struct OctreeNode:
     double size       # node side length
     double mass       # total mass in node
     double[3] com     # node COM
-    int num_particles # number of particles in node
+    int num_particles # number of particles stored in this node (leaf only)
+    int capacity      # allocated capacity of the particles array
     int depth         # node depth
     Particle* particles  # list of particles in the node
     OctreeNode** children  # list of node children
@@ -69,7 +68,7 @@ cdef class Octree:
     cdef double[:] masses
     cdef int max_depth
 
-    def __init__(self, positions_p: np.ndarray, masses_p: np.ndarray, theta: float = 0.5, G: float = 4.30091e-6, max_depth: int = 16):
+    def __init__(self, positions_p: np.ndarray, masses_p: np.ndarray, theta: float = 0.5, G: float = 4.30091e-6, max_depth: int = 16, njobs_build: int = 1):
         """
         Initialize the octree and insert particles into it.
         """
@@ -101,9 +100,12 @@ cdef class Octree:
         # create the root node of the octree
         self.root = create_octree_node(center, size, 1)
 
-        # insert each particle into the octree
-        for i in range(n):
-            insert(self.root, &positions[i, 0], masses[i], self.max_depth)
+        # insert particles into the octree
+        if njobs_build > 1:
+            self._build_parallel(positions, masses, njobs_build)
+        else:
+            for i in range(n):
+                insert(self.root, &positions[i, 0], masses[i], self.max_depth)
 
         # compute mass and center of mass over the entire tree
         compute_mass_com(self.root)
@@ -218,12 +220,77 @@ cdef class Octree:
         cdef double[:] potentials = np.zeros(n_parts, dtype=np.float64) # array to hold potentials
         
         if njobs > 1:
-            raise NotImplementedError("njobs > 1 not implemented yet.")
-            #compute_potential_parallel(self.root, positions, n_parts, potentials, njobs=njobs)
-        else:   
+            self.compute_potential_parallel(self.root, positions, n_parts, potentials, njobs)
+        else:
             self.compute_potential_serial(self.root, positions, n_parts, potentials)
 
         return np.array(potentials)
+
+    cdef void _build_parallel(self, double[:, :] positions, double[:] masses, int njobs):
+        '''
+        Two-phase parallel tree build using 64 level-2 subtrees for fine-grained parallelism:
+          Phase 1 (serial): subdivide root and its 8 children → 64 independent level-2 subtrees.
+          Phase 2 (parallel): prange over 64 groups, each thread builds one subtree at a time.
+        64 work units beats 8-core contention and balances clustered distributions well.
+        '''
+        cdef int i, k, oct1, oct2, flat_oct, n = self.n
+        cdef int max_depth = self.max_depth
+        cdef int[64] oct_counts
+        cdef int[65] oct_starts
+        cdef int[64] fill_pos
+        cdef int start, end
+
+        # typed memoryview arrays (allocated with GIL before parallel section)
+        cdef int[:] oct_idx    = np.empty(n, dtype=np.int32)
+        cdef int[:] sorted_idx = np.empty(n, dtype=np.int32)
+
+        # phase 1: pre-build two levels of the tree (64 leaf nodes) serially
+        _subdivide(self.root)
+        for k in range(8):
+            _subdivide(self.root.children[k])
+
+        # classify each particle into its level-2 cell (0..63 = oct1*8 + oct2)
+        for i in range(n):
+            oct1 = find_level1_octant(self.root,
+                                      positions[i, 0], positions[i, 1], positions[i, 2])
+            if oct1 < 0:
+                oct_idx[i] = -1
+                continue
+            oct2 = find_level1_octant(self.root.children[oct1],
+                                      positions[i, 0], positions[i, 1], positions[i, 2])
+            oct_idx[i] = oct1 * 8 + oct2 if oct2 >= 0 else -1
+
+        # counting sort to group particle indices contiguously per level-2 cell
+        for k in range(64):
+            oct_counts[k] = 0
+        for i in range(n):
+            flat_oct = oct_idx[i]
+            if flat_oct >= 0:
+                oct_counts[flat_oct] += 1
+
+        oct_starts[0] = 0
+        for k in range(64):
+            oct_starts[k + 1] = oct_starts[k] + oct_counts[k]
+
+        for k in range(64):
+            fill_pos[k] = oct_starts[k]
+        for i in range(n):
+            flat_oct = oct_idx[i]
+            if flat_oct >= 0:
+                sorted_idx[fill_pos[flat_oct]] = i
+                fill_pos[flat_oct] += 1
+
+        # phase 2: build each level-2 subtree in parallel — no shared mutable state
+        for flat_oct in prange(64, num_threads=njobs, schedule='dynamic', nogil=True):
+            oct1 = flat_oct // 8
+            oct2 = flat_oct  - oct1 * 8
+            start = oct_starts[flat_oct]
+            end   = oct_starts[flat_oct + 1]
+            for i in range(start, end):
+                k = sorted_idx[i]
+                insert_nogil(self.root.children[oct1].children[oct2],
+                             positions[k, 0], positions[k, 1], positions[k, 2],
+                             masses[k], max_depth)
 
     def __dealloc__(self):
         """
@@ -241,8 +308,8 @@ cdef class Octree:
         cdef double r
         cdef int i, j
 
-        # allocate a stack array with the maximum possible size of the number of particles used to build the tree
-        cdef int stack_capacity = 2 * self.max_depth # heuristic for largest expected stack size
+        # 8*max_depth covers the worst-case DFS stack depth for a full octree
+        cdef int stack_capacity = 8 * self.max_depth if 8 * self.max_depth > 64 else 64
         cdef OctreeNode** stack = <OctreeNode**> malloc(stack_capacity * sizeof(OctreeNode*))
         if stack is NULL:
             raise MemoryError("Failed to allocate initial stack")
@@ -290,7 +357,76 @@ cdef class Octree:
                                 stack_size += 1
         finally:
             free(stack)  # free memory allocated for stack
-    
+
+    cdef void compute_potential_parallel(self, OctreeNode* root, double[:, :] positions, int n_parts, double[:] potentials, int njobs):
+        '''
+        compute the gravitational potential for a batch of particles using OpenMP threads.
+        The inner tree walk is in a standalone nogil function so prange does not misidentify
+        loop-local variables (stack_size etc.) as reduction variables.
+        '''
+        cdef double G = self.G
+        cdef double theta = self.theta
+        cdef int initial_capacity = 8 * self.max_depth if 8 * self.max_depth > 64 else 64
+        cdef int i
+
+        for i in prange(n_parts, num_threads=njobs, schedule='dynamic', nogil=True):
+            potentials[i] = _bh_single_potential(root, positions[i, 0], positions[i, 1], positions[i, 2], G, theta, initial_capacity)
+
+cdef double _bh_single_potential(OctreeNode* root, double px, double py, double pz, double G, double theta, int initial_capacity) nogil:
+    '''
+    Compute the Barnes-Hut gravitational potential at a single point (px, py, pz).
+    Takes coordinates as separate scalars so callers using strided memoryviews do not
+    need to guarantee contiguous memory layout.
+    Allocates its own private stack so it is safe to call from parallel threads.
+    '''
+    cdef OctreeNode** stack = <OctreeNode**> malloc(initial_capacity * sizeof(OctreeNode*))
+    if stack is NULL:
+        return 0.0
+
+    cdef int stack_size = 1
+    cdef int stack_capacity = initial_capacity
+    cdef OctreeNode* node
+    cdef double rx, ry, rz
+    cdef double r_sq, r, potential = 0.0
+    cdef int j
+
+    stack[0] = root
+
+    while stack_size > 0:
+        node = stack[stack_size - 1]
+        stack_size -= 1
+
+        if node.mass == 0.0:
+            continue
+
+        rx = px - node.com[0]
+        ry = py - node.com[1]
+        rz = pz - node.com[2]
+
+        r_sq = rx * rx + ry * ry + rz * rz
+
+        if r_sq == 0.0:
+            continue
+
+        r = sqrt(r_sq)
+
+        if (node.size / r) < theta:
+            potential += -G * node.mass / r
+        else:
+            for j in range(8):
+                if node.children[j] is not NULL:
+                    if stack_size >= stack_capacity:
+                        stack_capacity *= 2
+                        stack = <OctreeNode**> realloc(stack, stack_capacity * sizeof(OctreeNode*))
+                        if stack is NULL:
+                            return potential  # partial result; can't raise in nogil
+                    stack[stack_size] = node.children[j]
+                    stack_size += 1
+
+    free(stack)
+    return potential
+
+
 cdef OctreeNode* create_octree_node(double[3] center, double size, int depth):
     '''
     creates a new OctreeNode
@@ -309,6 +445,7 @@ cdef OctreeNode* create_octree_node(double[3] center, double size, int depth):
     node.com[1] = 0.0
     node.com[2] = 0.0
     node.num_particles = 0
+    node.capacity = 0
     node.depth = depth
     node.particles = NULL
     node.children = <OctreeNode**>malloc(8 * sizeof(OctreeNode*))  # allocate memory for 8 child nodes
@@ -325,6 +462,8 @@ cdef void insert(OctreeNode* node, double[3] position, double mass, int max_dept
     inserts a particle into an OctreeNode
     '''
     # don't go any deeper than than max_depth
+    cdef int new_capacity
+    cdef int k
     if node.depth >= max_depth:
         # insert particle into the current node, don't subdivide further
         if node.particles is NULL:
@@ -336,14 +475,21 @@ cdef void insert(OctreeNode* node, double[3] position, double mass, int max_dept
             node.mass = mass
             node.com = position
             node.num_particles = 1
+            node.capacity = 1
         else:
-            # add particle to the existing list
+            # grow array with doubling strategy (E3)
+            if node.num_particles >= node.capacity:
+                new_capacity = node.capacity * 2
+                node.particles = <Particle*>realloc(node.particles, new_capacity * sizeof(Particle))
+                if node.particles is NULL:
+                    raise MemoryError("Failed to reallocate memory for particles in leaf node.")
+                node.capacity = new_capacity
+            # update COM as running weighted average before updating mass (Bug 1)
+            for k in range(3):
+                node.com[k] = (node.com[k] * node.mass + mass * position[k]) / (node.mass + mass)
+            node.particles[node.num_particles].position = position
+            node.particles[node.num_particles].mass = mass
             node.num_particles += 1
-            node.particles = <Particle*>realloc(node.particles, node.num_particles * sizeof(Particle))
-            if node.particles is NULL:
-                raise MemoryError("Failed to reallocate memory for particles in leaf node.")
-            node.particles[node.num_particles - 1].position = position
-            node.particles[node.num_particles - 1].mass = mass
             node.mass += mass
 
         return
@@ -370,6 +516,7 @@ cdef void _reinsert_existing_particles(OctreeNode* node, int max_depth):
     free(node.particles)
     node.particles = NULL
     node.num_particles = 0
+    node.capacity = 0
 
 cdef void _insert_in_child(OctreeNode* node, double[3] position, double mass, int max_depth):
     '''
@@ -390,7 +537,6 @@ cdef void _insert_in_child(OctreeNode* node, double[3] position, double mass, in
                 break
         else:
             insert(child, position, mass, max_depth)
-            child.num_particles += 1
             break
             
 cdef void _subdivide(OctreeNode* node):
@@ -416,7 +562,7 @@ cdef void compute_mass_com(OctreeNode* node):
 
     cdef double total_mass = 0.0
     cdef double[3] weighted_com = [0.0, 0.0, 0.0]
-    cdef int i
+    cdef int i, j
 
     # loop over all children and accumulate mass and COM
     for i in range(8):
@@ -485,7 +631,7 @@ cdef tuple collect_tree(OctreeNode* node, int max_search_depth=10, int depth=0):
     return (np.array(masses_list), np.array(sizes_list), np.array(positions_list), 
             np.array(coms_list), np.array(depths_list), np.array(num_particles_list))
 
-cdef void free_octree(OctreeNode* node):
+cdef void free_octree(OctreeNode* node) noexcept nogil:
     '''
     frees memory recursively
     '''
@@ -501,6 +647,162 @@ cdef void free_octree(OctreeNode* node):
     free(node.children)
     free(node)
     
+# ---- nogil helpers used by the parallel tree build ----
+
+cdef OctreeNode* create_octree_node_nogil(double[3] center, double size, int depth) nogil:
+    '''creates a new OctreeNode without acquiring the GIL'''
+    cdef OctreeNode* node = <OctreeNode*>malloc(sizeof(OctreeNode))
+    cdef int i
+    if node is NULL:
+        return NULL
+    node.center[0] = center[0]
+    node.center[1] = center[1]
+    node.center[2] = center[2]
+    node.size = size
+    node.mass = 0.0
+    node.com[0] = 0.0
+    node.com[1] = 0.0
+    node.com[2] = 0.0
+    node.num_particles = 0
+    node.capacity = 0
+    node.depth = depth
+    node.particles = NULL
+    node.children = <OctreeNode**>malloc(8 * sizeof(OctreeNode*))
+    if node.children is NULL:
+        free(node)
+        return NULL
+    for i in range(8):
+        node.children[i] = NULL
+    return node
+
+
+cdef bint _subdivide_nogil(OctreeNode* node) nogil:
+    '''subdivides a node; returns True on success, False on malloc failure'''
+    cdef double half_size = node.size / 2
+    cdef double[3] new_center
+    cdef int i, j
+    for i in range(8):
+        for j in range(3):
+            new_center[j] = node.center[j] + offsets[i][j] * (half_size / 2)
+        node.children[i] = create_octree_node_nogil(new_center, half_size, node.depth + 1)
+        if node.children[i] is NULL:
+            for j in range(i):
+                free_octree(node.children[j])
+                node.children[j] = NULL
+            return False
+    return True
+
+
+cdef int find_level1_octant(OctreeNode* root, double px, double py, double pz) nogil:
+    '''
+    Return the index (0-7) of the root's child cell that contains (px, py, pz).
+    Uses the same boundary logic as _insert_in_child so results are always consistent.
+    Returns -1 if the particle falls outside all children (edge case).
+    '''
+    cdef OctreeNode* child
+    cdef double diff0, diff1, diff2, half
+    cdef int i
+    for i in range(8):
+        child = root.children[i]
+        if child is NULL:
+            continue
+        diff0 = px - child.center[0]
+        diff1 = py - child.center[1]
+        diff2 = pz - child.center[2]
+        half = child.size / 2
+        if (diff0 >= -half and diff0 <= half and
+                diff1 >= -half and diff1 <= half and
+                diff2 >= -half and diff2 <= half):
+            return i
+    return -1
+
+
+cdef bint _reinsert_existing_particles_nogil(OctreeNode* node, int max_depth) nogil:
+    '''reinserts stored particles into child nodes after subdivision; returns True on success'''
+    cdef int i
+    cdef Particle particle
+    cdef bint ok = True
+    for i in range(node.num_particles):
+        particle = node.particles[i]
+        if not _insert_in_child_nogil(node,
+                particle.position[0], particle.position[1], particle.position[2],
+                particle.mass, max_depth):
+            ok = False
+    free(node.particles)
+    node.particles = NULL
+    node.num_particles = 0
+    node.capacity = 0
+    return ok
+
+
+cdef bint insert_nogil(OctreeNode* node, double px, double py, double pz, double mass, int max_depth) nogil:
+    '''
+    Insert a particle at (px, py, pz) into the subtree rooted at node.
+    Takes coordinates as separate scalars to work correctly with non-contiguous arrays.
+    Returns True on success, False on malloc failure (particle silently dropped).
+    '''
+    cdef int new_capacity, k
+    if node.depth >= max_depth:
+        if node.particles is NULL:
+            node.particles = <Particle*>malloc(sizeof(Particle))
+            if node.particles is NULL:
+                return False
+            node.particles[0].position[0] = px
+            node.particles[0].position[1] = py
+            node.particles[0].position[2] = pz
+            node.particles[0].mass = mass
+            node.mass = mass
+            node.com[0] = px
+            node.com[1] = py
+            node.com[2] = pz
+            node.num_particles = 1
+            node.capacity = 1
+        else:
+            if node.num_particles >= node.capacity:
+                new_capacity = node.capacity * 2
+                node.particles = <Particle*>realloc(node.particles, new_capacity * sizeof(Particle))
+                if node.particles is NULL:
+                    return False
+                node.capacity = new_capacity
+            node.com[0] = (node.com[0] * node.mass + mass * px) / (node.mass + mass)
+            node.com[1] = (node.com[1] * node.mass + mass * py) / (node.mass + mass)
+            node.com[2] = (node.com[2] * node.mass + mass * pz) / (node.mass + mass)
+            node.particles[node.num_particles].position[0] = px
+            node.particles[node.num_particles].position[1] = py
+            node.particles[node.num_particles].position[2] = pz
+            node.particles[node.num_particles].mass = mass
+            node.num_particles += 1
+            node.mass += mass
+        return True
+
+    if node.children[0] is NULL:
+        if not _subdivide_nogil(node):
+            return False
+        if not _reinsert_existing_particles_nogil(node, max_depth):
+            return False
+    return _insert_in_child_nogil(node, px, py, pz, mass, max_depth)
+
+
+cdef bint _insert_in_child_nogil(OctreeNode* node, double px, double py, double pz, double mass, int max_depth) nogil:
+    '''route a particle to the correct child and insert it; returns True on success'''
+    cdef OctreeNode* child
+    cdef double diff0, diff1, diff2, half
+    cdef int i
+    for i in range(8):
+        child = node.children[i]
+        if child is NULL:
+            continue
+        diff0 = px - child.center[0]
+        diff1 = py - child.center[1]
+        diff2 = pz - child.center[2]
+        half = child.size / 2
+        if (diff0 >= -half and diff0 <= half and
+                diff1 >= -half and diff1 <= half and
+                diff2 >= -half and diff2 <= half):
+            return insert_nogil(child, px, py, pz, mass, max_depth)
+    return True  # particle outside all children — skip (shouldn't happen for valid input)
+
+
 def generate_test_distribution(N_pot_main=20000, M_pot_main=1e12, R_pot_main=100, N_small_clusters=12):
     '''
     generates a test distribution consisting of one large central blob and a number of smaller ones
