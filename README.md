@@ -19,7 +19,7 @@ The Octree class takes particle positions and masses as input, constructs the oc
 ```
 import bh_potential as bh
 
-octree = bh.Octree(positions, masses)
+octree = bh.Octree(positions, masses, njobs_build=1)
 ```
 
 `positions`: A NumPy array of shape (n_particles, 3) representing particle positions in 3D space in units of kpc.
@@ -29,7 +29,7 @@ octree = bh.Octree(positions, masses)
 #### *Compute gravitational potentials at new positions*
 Use the compute_potentials method to calculate the gravitational potential at specified positions:
 ```
-potentials = octree.compute_potentials(test_positions)
+potentials = octree.compute_potentials(test_positions, njobs=1)
 ```
 
 `test_positions`: A NumPy array of shape (n_points, 3) containing the positions where the potential should be evaluated.
@@ -50,10 +50,10 @@ positions = np.random.normal(0, R_pot, (N_pot, 3))
 masses = np.asarray([M_pot/N_pot]*N_pot)
 
 # Build the octree
-octree = bh.Octree(positions, masses)
+octree = bh.Octree(positions, masses, njobs_build=4)
 
 # Evaluate the potential at the same positions
-potentials = octree.compute_potentials(positions)
+potentials = octree.compute_potentials(positions, njobs=4)
 ```
 
 ## Demo
